@@ -5,8 +5,6 @@ from esphome.const import (
     CONF_ID,
     DEVICE_CLASS_TEMPERATURE,
     STATE_CLASS_MEASUREMENT,
-    UNIT_CELSIUS,
-    UNIT_FAHRENHEIT,
 )
 from . import SmokeXComponent, smoke_x_ns
 

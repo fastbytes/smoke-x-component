@@ -22,10 +22,7 @@ wifi:
 
 # External component
 external_components:
-  - source:
-      type: git
-      url: https://github.com/fastbytes/smoke-x-receiver.git
-      version: esphome
+  - source: github://fastbytes/smoke-x-component
     components: [ smoke_x ]
 
 # SPI for LoRa
