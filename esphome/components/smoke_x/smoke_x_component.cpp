@@ -101,9 +101,9 @@ void SmokeXComponent::loop() {
 
 void SmokeXComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Smoke X:");
-  ESP_LOGCONFIG(TAG, "  RST Pin: %u", lora_rst_pin_);
-  ESP_LOGCONFIG(TAG, "  BUSY Pin: %u", lora_busy_pin_);
-  ESP_LOGCONFIG(TAG, "  DIO1 Pin: %u", lora_dio1_pin_);
+  LOG_PIN("  RST Pin: ", lora_rst_pin_);
+  LOG_PIN("  BUSY Pin: ", lora_busy_pin_);
+  LOG_PIN("  DIO1 Pin: ", lora_dio1_pin_);
   ESP_LOGCONFIG(TAG, "  Sync Frequency: %u MHz", sync_frequency_ / 1000000);
   ESP_LOGCONFIG(TAG, "  Num Probes: %u", num_probes_);
   
@@ -118,14 +118,11 @@ void SmokeXComponent::dump_config() {
 void SmokeXComponent::init_lora() {
   ESP_LOGD(TAG, "Initializing LoRa SX1262...");
   
+  // Ensure SPI bus is configured per SPIDevice template params
+  this->spi_setup();
+
   // Create LoRa instance
-  lora_ = new LoRaSX1262(
-    &this->spi_,
-    this->cs_->get_pin(),
-    lora_rst_pin_,
-    lora_busy_pin_,
-    lora_dio1_pin_
-  );
+  lora_ = new LoRaSX1262(this, lora_rst_pin_, lora_busy_pin_, lora_dio1_pin_);
   
   // Initialize with sync frequency
   if (!lora_->begin(sync_frequency_)) {
@@ -464,15 +461,23 @@ void SmokeXComponent::register_probe_alarm_sensor(binary_sensor::BinarySensor *s
 
 // ==================== LoRaSX1262 Implementation ====================
 
-LoRaSX1262::LoRaSX1262(SPIClass *spi, uint8_t cs_pin, uint8_t rst_pin, uint8_t busy_pin, uint8_t dio1_pin)
-    : spi_(spi), cs_pin_(cs_pin), rst_pin_(rst_pin), busy_pin_(busy_pin), dio1_pin_(dio1_pin) {
+LoRaSX1262::LoRaSX1262(SmokeXComponent *parent, GPIOPin *rst_pin, GPIOPin *busy_pin, GPIOPin *dio1_pin)
+    : parent_(parent), rst_pin_(rst_pin), busy_pin_(busy_pin), dio1_pin_(dio1_pin) {
   
-  pinMode(cs_pin_, OUTPUT);
-  digitalWrite(cs_pin_, HIGH);
+  if (this->rst_pin_ != nullptr) {
+    this->rst_pin_->setup();
+    this->rst_pin_->pin_mode(gpio::FLAG_OUTPUT);
+  }
   
-  pinMode(rst_pin_, OUTPUT);
-  pinMode(busy_pin_, INPUT);
-  pinMode(dio1_pin_, INPUT);
+  if (this->busy_pin_ != nullptr) {
+    this->busy_pin_->setup();
+    this->busy_pin_->pin_mode(gpio::FLAG_INPUT);
+  }
+  
+  if (this->dio1_pin_ != nullptr) {
+    this->dio1_pin_->setup();
+    this->dio1_pin_->pin_mode(gpio::FLAG_INPUT);
+  }
 }
 
 bool LoRaSX1262::begin(uint32_t frequency) {
@@ -617,7 +622,10 @@ void LoRaSX1262::start_receive() {
 
 bool LoRaSX1262::is_receiving() {
   // Check if DIO1 is high (packet received)
-  return digitalRead(dio1_pin_) == HIGH;
+  if (dio1_pin_ != nullptr) {
+    return dio1_pin_->digital_read();
+  }
+  return false;
 }
 
 int LoRaSX1262::receive_packet(uint8_t *buffer, size_t size) {
@@ -642,15 +650,11 @@ int LoRaSX1262::receive_packet(uint8_t *buffer, size_t size) {
   }
   
   // Read buffer
-  uint8_t cmd[2] = {rx_start_buffer_pointer, 0x00};
-  digitalWrite(cs_pin_, LOW);
-  spi_->transfer(SX126X_CMD_READ_BUFFER);
-  spi_->transfer(cmd[0]);
-  spi_->transfer(cmd[1]);
-  for (int i = 0; i < payload_length; i++) {
-    buffer[i] = spi_->transfer(0x00);
-  }
-  digitalWrite(cs_pin_, HIGH);
+  uint8_t cmd[3] = {SX126X_CMD_READ_BUFFER, rx_start_buffer_pointer, 0x00};
+  parent_->enable();
+  parent_->write_array(cmd, 3);
+  parent_->read_array(buffer, payload_length);
+  parent_->disable();
   
   // Get packet status (RSSI, SNR)
   uint8_t packet_status[3];
@@ -672,13 +676,11 @@ void LoRaSX1262::send_packet(const uint8_t *buffer, size_t size) {
   write_command(SX126X_CMD_SET_STANDBY, &standby_config, 1);
   
   // Write buffer
-  digitalWrite(cs_pin_, LOW);
-  spi_->transfer(SX126X_CMD_WRITE_BUFFER);
-  spi_->transfer(0x00);  // offset
-  for (size_t i = 0; i < size; i++) {
-    spi_->transfer(buffer[i]);
-  }
-  digitalWrite(cs_pin_, HIGH);
+  uint8_t cmd[2] = {SX126X_CMD_WRITE_BUFFER, 0x00};  // offset
+  parent_->enable();
+  parent_->write_array(cmd, 2);
+  parent_->write_array(buffer, size);
+  parent_->disable();
   
   // Set packet params with actual payload length
   uint8_t packet_params[9] = {
@@ -709,7 +711,7 @@ void LoRaSX1262::send_packet(const uint8_t *buffer, size_t size) {
   
   // Wait for transmission to complete
   uint32_t start = millis();
-  while (digitalRead(dio1_pin_) == LOW) {
+  while (dio1_pin_ != nullptr && !dio1_pin_->digital_read()) {
     if (millis() - start > 1000) {
       ESP_LOGW(TAG, "TX timeout");
       break;
@@ -722,66 +724,66 @@ void LoRaSX1262::send_packet(const uint8_t *buffer, size_t size) {
 }
 
 void LoRaSX1262::reset() {
-  digitalWrite(rst_pin_, LOW);
-  delay(10);
-  digitalWrite(rst_pin_, HIGH);
-  delay(20);
+  if (rst_pin_ != nullptr) {
+    rst_pin_->digital_write(false);
+    delay(10);
+    rst_pin_->digital_write(true);
+    delay(20);
+  }
 }
 
 void LoRaSX1262::wait_busy() {
-  while (digitalRead(busy_pin_) == HIGH) {
-    delayMicroseconds(10);
+  if (busy_pin_ != nullptr) {
+    while (busy_pin_->digital_read()) {
+      delayMicroseconds(10);
+    }
   }
 }
 
 void LoRaSX1262::write_command(uint8_t cmd, const uint8_t *data, size_t len) {
   wait_busy();
   
-  digitalWrite(cs_pin_, LOW);
-  spi_->transfer(cmd);
-  for (size_t i = 0; i < len; i++) {
-    spi_->transfer(data[i]);
+  parent_->enable();
+  parent_->write_byte(cmd);
+  if (data != nullptr && len > 0) {
+    parent_->write_array(data, len);
   }
-  digitalWrite(cs_pin_, HIGH);
+  parent_->disable();
 }
 
 void LoRaSX1262::read_command(uint8_t cmd, uint8_t *data, size_t len) {
   wait_busy();
   
-  digitalWrite(cs_pin_, LOW);
-  spi_->transfer(cmd);
-  spi_->transfer(0x00);  // NOP
-  for (size_t i = 0; i < len; i++) {
-    data[i] = spi_->transfer(0x00);
-  }
-  digitalWrite(cs_pin_, HIGH);
+  parent_->enable();
+  parent_->write_byte(cmd);
+  parent_->write_byte(0x00);  // NOP
+  parent_->read_array(data, len);
+  parent_->disable();
 }
 
 void LoRaSX1262::write_register(uint16_t address, const uint8_t *data, size_t len) {
   wait_busy();
   
-  digitalWrite(cs_pin_, LOW);
-  spi_->transfer(0x0D);  // Write register command
-  spi_->transfer((address >> 8) & 0xFF);
-  spi_->transfer(address & 0xFF);
-  for (size_t i = 0; i < len; i++) {
-    spi_->transfer(data[i]);
+  parent_->enable();
+  parent_->write_byte(0x0D);  // Write register command
+  parent_->write_byte((address >> 8) & 0xFF);
+  parent_->write_byte(address & 0xFF);
+  if (data != nullptr && len > 0) {
+    parent_->write_array(data, len);
   }
-  digitalWrite(cs_pin_, HIGH);
+  parent_->disable();
 }
 
 void LoRaSX1262::read_register(uint16_t address, uint8_t *data, size_t len) {
   wait_busy();
   
-  digitalWrite(cs_pin_, LOW);
-  spi_->transfer(0x1D);  // Read register command
-  spi_->transfer((address >> 8) & 0xFF);
-  spi_->transfer(address & 0xFF);
-  spi_->transfer(0x00);  // NOP
-  for (size_t i = 0; i < len; i++) {
-    data[i] = spi_->transfer(0x00);
-  }
-  digitalWrite(cs_pin_, HIGH);
+  parent_->enable();
+  parent_->write_byte(0x1D);  // Read register command
+  parent_->write_byte((address >> 8) & 0xFF);
+  parent_->write_byte(address & 0xFF);
+  parent_->write_byte(0x00);  // NOP
+  parent_->read_array(data, len);
+  parent_->disable();
 }
 
 }  // namespace smoke_x

@@ -5,6 +5,7 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/core/hal.h"
 #include <vector>
 #include <string>
 
@@ -30,9 +31,9 @@ class SmokeXComponent : public Component, public spi::SPIDevice<spi::BIT_ORDER_M
   float get_setup_priority() const override { return setup_priority::DATA; }
 
   // Configuration methods
-  void set_lora_rst_pin(uint8_t pin) { lora_rst_pin_ = pin; }
-  void set_lora_busy_pin(uint8_t pin) { lora_busy_pin_ = pin; }
-  void set_lora_dio1_pin(uint8_t pin) { lora_dio1_pin_ = pin; }
+  void set_lora_rst_pin(GPIOPin *pin) { lora_rst_pin_ = pin; }
+  void set_lora_busy_pin(GPIOPin *pin) { lora_busy_pin_ = pin; }
+  void set_lora_dio1_pin(GPIOPin *pin) { lora_dio1_pin_ = pin; }
   void set_sync_frequency(uint32_t freq) { sync_frequency_ = freq; }
   void set_num_probes(uint8_t num) { num_probes_ = num; }
   void set_enabled(bool enabled);
@@ -54,9 +55,9 @@ class SmokeXComponent : public Component, public spi::SPIDevice<spi::BIT_ORDER_M
 
  protected:
   // LoRa pins
-  uint8_t lora_rst_pin_{12};
-  uint8_t lora_busy_pin_{13};
-  uint8_t lora_dio1_pin_{14};
+  GPIOPin *lora_rst_pin_{nullptr};
+  GPIOPin *lora_busy_pin_{nullptr};
+  GPIOPin *lora_dio1_pin_{nullptr};
   
   // Configuration
   uint32_t sync_frequency_{920000000};
@@ -107,7 +108,7 @@ class SmokeXComponent : public Component, public spi::SPIDevice<spi::BIT_ORDER_M
 // Simple LoRa SX1262 wrapper for ESPHome
 class LoRaSX1262 {
  public:
-  LoRaSX1262(SPIClass *spi, uint8_t cs_pin, uint8_t rst_pin, uint8_t busy_pin, uint8_t dio1_pin);
+  LoRaSX1262(SmokeXComponent *parent, GPIOPin *rst_pin, GPIOPin *busy_pin, GPIOPin *dio1_pin);
   
   bool begin(uint32_t frequency);
   void set_frequency(uint32_t frequency);
@@ -130,11 +131,10 @@ class LoRaSX1262 {
   float get_snr() { return last_snr_; }
   
  protected:
-  SPIClass *spi_;
-  uint8_t cs_pin_;
-  uint8_t rst_pin_;
-  uint8_t busy_pin_;
-  uint8_t dio1_pin_;
+  SmokeXComponent *parent_;
+  GPIOPin *rst_pin_;
+  GPIOPin *busy_pin_;
+  GPIOPin *dio1_pin_;
   
   int last_rssi_{0};
   float last_snr_{0.0f};
