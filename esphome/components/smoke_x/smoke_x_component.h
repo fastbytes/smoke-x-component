@@ -35,6 +35,8 @@ class SmokeXComponent : public Component, public spi::SPIDevice<spi::BIT_ORDER_M
   void set_lora_dio1_pin(uint8_t pin) { lora_dio1_pin_ = pin; }
   void set_sync_frequency(uint32_t freq) { sync_frequency_ = freq; }
   void set_num_probes(uint8_t num) { num_probes_ = num; }
+  void set_enabled(bool enabled);
+  bool is_enabled() const { return enabled_; }
 
   // Sensor registration methods
   void register_temperature_sensor(sensor::Sensor *sensor, uint8_t probe_index);
@@ -60,6 +62,7 @@ class SmokeXComponent : public Component, public spi::SPIDevice<spi::BIT_ORDER_M
   uint32_t sync_frequency_{920000000};
   uint32_t operating_frequency_{0};
   uint8_t num_probes_{4};
+  bool enabled_{false};
   
   // State
   bool configured_{false};
@@ -91,6 +94,7 @@ class SmokeXComponent : public Component, public spi::SPIDevice<spi::BIT_ORDER_M
   
   // Methods
   void init_lora();
+  void deinit_lora();
   void handle_lora_rx();
   void handle_sync_message(const char *msg, int len);
   void handle_state_message(const char *msg, int len);
@@ -114,6 +118,8 @@ class LoRaSX1262 {
   void set_sync_word(uint8_t sw);
   void set_crc(bool enable);
   void set_tx_power(int8_t power);
+  void sleep();
+  void standby();
   
   void start_receive();
   bool is_receiving();

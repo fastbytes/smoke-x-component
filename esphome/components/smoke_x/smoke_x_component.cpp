@@ -48,8 +48,12 @@ static const int NUM_COMMAS_X4_STATE_MSG = 26;
 void SmokeXComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Smoke X Component...");
   
-  // Initialize LoRa
-  init_lora();
+  // Initialize LoRa if enabled
+  if (enabled_) {
+    init_lora();
+  } else {
+    ESP_LOGI(TAG, "Smoke X is disabled at boot");
+  }
   
   // Set initial state
   configured_ = false;
@@ -70,11 +74,13 @@ void SmokeXComponent::setup() {
 void SmokeXComponent::loop() {
   uint32_t now = millis();
   
-  // Handle LoRa reception
-  handle_lora_rx();
+  // Handle LoRa reception when enabled
+  if (enabled_) {
+    handle_lora_rx();
+  }
   
   // If not configured, switch between sync frequencies
-  if (!configured_ && !sync_received_) {
+  if (enabled_ && !configured_ && !sync_received_) {
     if (now - last_sync_attempt_ > sync_switch_interval_) {
       last_sync_attempt_ = now;
       
@@ -88,7 +94,7 @@ void SmokeXComponent::loop() {
   }
   
   // Check for timeout if configured
-  if (configured_ && (now - last_data_received_ > 30000)) {
+  if (enabled_ && configured_ && (now - last_data_received_ > 30000)) {
     ESP_LOGW(TAG, "No data received for 30 seconds");
   }
 }
@@ -140,6 +146,12 @@ void SmokeXComponent::init_lora() {
   lora_->start_receive();
   
   ESP_LOGD(TAG, "LoRa initialized successfully");
+}
+
+void SmokeXComponent::deinit_lora() {
+  if (!lora_) return;
+  ESP_LOGD(TAG, "Deinitializing LoRa SX1262 (sleep)");
+  lora_->sleep();
 }
 
 void SmokeXComponent::handle_lora_rx() {
@@ -401,8 +413,22 @@ void SmokeXComponent::trigger_sync() {
   device_id_.clear();
   operating_frequency_ = 0;
   sync_frequency_ = SMOKE_X2_SYNC_FREQ;
-  set_frequency(sync_frequency_);
+  if (enabled_) {
+    set_frequency(sync_frequency_);
+  }
   last_sync_attempt_ = millis();
+}
+
+void SmokeXComponent::set_enabled(bool enabled) {
+  if (enabled_ == enabled) return;
+  enabled_ = enabled;
+  if (enabled_) {
+    ESP_LOGI(TAG, "Smoke X enabled");
+    init_lora();
+  } else {
+    ESP_LOGI(TAG, "Smoke X disabled");
+    deinit_lora();
+  }
 }
 
 // Sensor registration methods
@@ -547,6 +573,16 @@ void LoRaSX1262::set_crc(bool enable) {
 void LoRaSX1262::set_tx_power(int8_t power) {
   uint8_t tx_params[2] = {(uint8_t)power, 0x04};  // Power, ramp time 200us
   write_command(SX126X_CMD_SET_TX_PARAMS, tx_params, 2);
+}
+
+void LoRaSX1262::sleep() {
+  uint8_t sleep_params = 0x04; // warm start, retain RTC and registers
+  write_command(SX126X_CMD_SET_SLEEP, &sleep_params, 1);
+}
+
+void LoRaSX1262::standby() {
+  uint8_t standby_config = 0x00;  // STDBY_RC
+  write_command(SX126X_CMD_SET_STANDBY, &standby_config, 1);
 }
 
 void LoRaSX1262::start_receive() {
