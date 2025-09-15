@@ -92,7 +92,7 @@ Add the Smoke X external component to your ESPHome configuration:
 external_components:
   - source:
       type: local
-      path: /path/to/smoke-x-receiver/esphome_component/components
+      path: /path/to/smoke-x-component/esphome/components
     components: [ smoke_x ]
 ```
 
@@ -100,7 +100,7 @@ Or if using from GitHub:
 
 ```yaml
 external_components:
-  - source: github://G-Two/smoke-x-receiver@esphome
+  - source: github://fastbytes/smoke-x-component
     components: [ smoke_x ]
 ```
 
@@ -256,7 +256,7 @@ PRs to fix bugs or enhance/add functionality are welcome!
 
 ### Component Structure
 
-The ESPHome component is located in `esphome_component/components/smoke_x/` and consists of:
+The ESPHome component is located in `esphome/components/smoke_x/` and consists of:
 
 - `__init__.py` - Component configuration and setup
 - `smoke_x_component.h/cpp` - Core C++ implementation
